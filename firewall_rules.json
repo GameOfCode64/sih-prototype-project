@@ -4,5 +4,11 @@
         "domain": "bhavishya.com",
         "ip_address": "192.168.22.55",
         "protocol": "TCP"
+    },
+    {
+        "app_name": "telnet",
+        "domain": "aws.abhi.jain",
+        "ip_address": "172.168.22.55",
+        "protocol": "TCP"
     }
 ]
