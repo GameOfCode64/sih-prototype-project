@@ -5,7 +5,6 @@ import json
 import time
 import os
 import openai
-# import nmap
 
 # File to store firewall rules persistently
 FIREWALL_RULES_FILE = 'firewall_rules.json'
@@ -43,17 +42,100 @@ def save_traffic_logs():
 firewall_rules = load_firewall_rules()
 traffic_logs = load_traffic_logs()
 
+# Constants for rate limits
+MAX_REQUESTS_PER_MINUTE = 20   # Replace with your actual RPM limit
+MAX_TOKENS_PER_MINUTE = 1500   # Replace with your actual TPM limit
+
+# Token and request counters
+request_counter = 0
+token_counter = 0
+
+# Time tracking for rate limiting
+last_reset_time = time.time()
+
 # Function to send traffic data to ChatGPT for analysis
 def analyze_traffic_with_chatgpt(traffic_data):
+    global request_counter, token_counter, last_reset_time
+
+    # Ensure we reset counters every minute
+    current_time = time.time()
+    if current_time - last_reset_time > 60:
+        request_counter = 0
+        token_counter = 0
+        last_reset_time = current_time
+
+    # Check if we've hit the request or token limit
+    if request_counter >= MAX_REQUESTS_PER_MINUTE or token_counter >= MAX_TOKENS_PER_MINUTE:
+        time_to_wait = 60 - (current_time - last_reset_time)
+        click.echo(f"Rate limit reached. Waiting for {int(time_to_wait)} seconds...")
+        time.sleep(time_to_wait)
+
+        # Reset counters after waiting
+        request_counter = 0
+        token_counter = 0
+        last_reset_time = time.time()
+
+    # Prepare the prompt for traffic analysis
     prompt = f"Analyze the following network traffic data for any anomalies or security risks: {traffic_data}"
-    
-    response = openai.Completion.create(
-        engine="text-davinci-003",
-        prompt=prompt,
+
+    # Estimate token usage (prompt tokens + response tokens)
+    prompt_token_count = len(prompt.split())  # Rough token estimate based on word count
+    response_token_count = 150                # Assuming max tokens for response
+    total_tokens = prompt_token_count + response_token_count
+
+    # Check token usage limit
+    if token_counter + total_tokens > MAX_TOKENS_PER_MINUTE:
+        click.echo("Token limit reached, waiting until the next minute...")
+        time.sleep(60 - (time.time() - last_reset_time))  # Wait until next minute
+
+        # Reset counters after waiting
+        request_counter = 0
+        token_counter = 0
+        last_reset_time = time.time()
+
+    # Call OpenAI API using gpt-3.5-turbo
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant analyzing network traffic for security risks."},
+            {"role": "user", "content": prompt}
+        ],
         max_tokens=150
     )
     
-    return response.choices[0].text.strip()
+    # Update counters
+    request_counter += 1
+    token_counter += total_tokens
+
+    return response['choices'][0]['message']['content'].strip()
+
+# Monitor active network connections with rate-limited GPT analysis
+@click.command()
+def monitor_traffic():
+    traffic_batch = []
+    click.echo("Monitoring traffic... Press Ctrl+C to stop.")
+    
+    try:
+        while True:
+            for conn in psutil.net_connections(kind='inet'):
+                if conn.status == psutil.CONN_ESTABLISHED:
+                    traffic_entry = {
+                        "pid": conn.pid,
+                        "local_address": f"{conn.laddr.ip}:{conn.laddr.port}",
+                        "remote_address": f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else None,
+                        "status": conn.status
+                    }
+                    traffic_batch.append(traffic_entry)
+
+                    # When batch size reaches 100, send to ChatGPT for analysis
+                    if len(traffic_batch) >= 100:
+                        analysis = analyze_traffic_with_chatgpt(traffic_batch)
+                        click.echo(f"ChatGPT Analysis: {analysis}")
+                        traffic_batch.clear()  # Clear the batch after processing
+
+            time.sleep(5)
+    except KeyboardInterrupt:
+        click.echo("Stopped monitoring traffic.")
 
 # Add a new firewall rule
 @click.command()
@@ -82,36 +164,6 @@ def list_rules():
     else:
         click.echo("No firewall rules found.")
 
-# Monitor active network connections with alert for unknown domains
-@click.command()
-def monitor_traffic():
-    click.echo("Monitoring traffic... Press Ctrl+C to stop.")
-    try:
-        while True:
-            for conn in psutil.net_connections(kind='inet'):
-                if conn.status == psutil.CONN_ESTABLISHED:
-                    traffic_entry = {
-                        "pid": conn.pid,
-                        "local_address": f"{conn.laddr.ip}:{conn.laddr.port}",
-                        "remote_address": f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else None,
-                        "status": conn.status
-                    }
-                    traffic_logs.append(traffic_entry)
-                    click.echo(traffic_entry)
-
-                    # Trigger alert for unknown domain
-                    if traffic_entry['remote_address'] and "unknown.com" in traffic_entry['remote_address']:
-                        click.echo("ALERT: Unknown domain detected!")
-
-                    # Analyze with GPT
-                    analysis = analyze_traffic_with_chatgpt(traffic_entry)
-                    click.echo(f"ChatGPT Analysis: {analysis}")
-
-            save_traffic_logs()  # Save traffic logs to the file after each monitoring round
-            time.sleep(5)
-    except KeyboardInterrupt:
-        click.echo("Stopped monitoring traffic.")
-
 # Send traffic logs to a backend server
 @click.command()
 @click.option('--backend_url', prompt='Backend URL', default='http://localhost:5000/logs', help='Backend server URL.')
@@ -138,20 +190,6 @@ def list_traffic_logs():
     else:
         click.echo("No traffic logs found.")
 
-# Perform an Nmap port scan
-# @click.command()
-# @click.option('--target', prompt='Target IP/Domain', help='Target IP address or domain for port scanning.')
-# def nmap_scan(target):
-#     click.echo(f"Performing Nmap scan on {target}...")
-#     nm = nmap.PortScanner()
-#     nm.scan(target, '1-1024')  # Scan ports 1-1024
-#     for host in nm.all_hosts():
-#         click.echo(f"Host: {host}")
-#         for proto in nm[host].all_protocols():
-#             ports = nm[host][proto].keys()
-#             for port in ports:
-#                 click.echo(f"Port: {port}, State: {nm[host][proto][port]['state']}")
-
 # CLI group to organize commands
 @click.group()
 def cli():
@@ -162,7 +200,6 @@ cli.add_command(list_rules)
 cli.add_command(monitor_traffic)
 cli.add_command(send_logs)
 cli.add_command(list_traffic_logs)
-# cli.add_command(nmap_scan)
 
 if __name__ == '__main__':
     cli()
