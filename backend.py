@@ -7,7 +7,7 @@ app = Flask(__name__)
 @app.route('/logs', methods=['POST'])
 def receive_logs():
     log_data = request.json
-    print("Received log data:")
+    print("Received logs data:")
     print(json.dumps(log_data, indent=4))
 
     # Basic alert system based on conditions (e.g., detecting abnormal traffic)
