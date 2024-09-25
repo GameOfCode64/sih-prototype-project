@@ -1,17 +1,22 @@
+import { useEffect, useState } from "react";
+import io, { Socket } from "socket.io-client";
 import { Rss } from "lucide-react";
-import { useEffect, useState, useRef } from "react";
-import io from "socket.io-client";
+import Modal from "react-modal";
 
-// Connect to the WebSocket server
-const socket = io("http://localhost:5000");
+// Establish socket connection (ensure it's initialized once)
+const socket: Socket = io("http://localhost:5000");
 
 const NetworkLogs = () => {
-  const [logs, setLogs] = useState<string[]>([]);
-  const logRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [logs, setLogs] = useState<any[]>([]);
+  const [modalIsOpen, setIsOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [currentPacket, setCurrentPacket] = useState<any>(null);
 
   useEffect(() => {
     socket.on("log", (data) => {
-      setLogs((prevLogs) => [...prevLogs, data.message]);
+      const packetInfo = data.message; // Extract the packet info
+      setLogs((prevLogs) => [...prevLogs, packetInfo]);
     });
 
     return () => {
@@ -19,34 +24,115 @@ const NetworkLogs = () => {
     };
   }, []);
 
-  useEffect(() => {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [logs]);
+  const openModal = (packet: unknown) => {
+    setCurrentPacket(packet);
+    setIsOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsOpen(false);
+    setCurrentPacket(null);
+  };
+
+  // Function to format payload data (if needed)
+  const formatPayload = (payload: string) => {
+    return payload.replace(/\\x/g, " ").trim(); // Basic formatting to remove \x
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderPacketInfo = (packet: any) => {
+    return (
+      <div className="bg-gray-800 text-white p-4 rounded-md shadow-md">
+        <h3 className="font-bold text-lg">Packet Details</h3>
+        <div className="mt-2 space-y-1">
+          <div>
+            <strong>Version:</strong> {packet.version}
+          </div>
+          <div>
+            <strong>IHL:</strong> {packet.ihl}
+          </div>
+          <div>
+            <strong>Type of Service:</strong> {packet.tos}
+          </div>
+          <div>
+            <strong>Total Length:</strong> {packet.total_length}
+          </div>
+          <div>
+            <strong>Identification:</strong> {packet.identification}
+          </div>
+          <div>
+            <strong>Flags:</strong> {packet.flags}
+          </div>
+          <div>
+            <strong>TTL:</strong> {packet.ttl}
+          </div>
+          <div>
+            <strong>Protocol:</strong> {packet.protocol}
+          </div>
+          <div>
+            <strong>Header Checksum:</strong> {packet.header_checksum}
+          </div>
+          <div>
+            <strong>Source IP Address:</strong> {packet.src_ip}
+          </div>
+          <div>
+            <strong>Destination IP Address:</strong> {packet.dst_ip}
+          </div>
+          <div>
+            <strong>Options:</strong>{" "}
+            {packet.options ? packet.options.join(", ") : "None"}
+          </div>
+          <div>
+            <strong>Payload Data:</strong> {formatPayload(packet.payload)}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="flex w-full px-4 flex-col py-6 h-screen">
-      <p className="text-lg text-[#27bb90] font-medium flex items-center mb-4">
+    <div className="py-6 px-6 w-full">
+      <p className="text-lg text-[#27bb90] font-medium flex items-center">
         <Rss className="mr-2" size={18} /> Real Time Network Logs
       </p>
 
-      <div
-        className="w-full h-[80vh] bg-gray-900 text-white rounded-lg p-4 overflow-auto shadow-lg"
-        ref={logRef}
-      >
-        {logs.length === 0 ? (
-          <p className="text-center text-gray-400">No logs to display</p>
-        ) : (
-          <ul className="space-y-2">
-            {logs.map((log, index) => (
-              <li key={index} className="bg-gray-800 p-3 rounded-md shadow-md">
-                {log}
-              </li>
-            ))}
-          </ul>
-        )}
+      <div className="w-full mt-4 h-[80vh] bg-gray-900 text-white rounded-lg p-4 overflow-auto shadow-lg">
+        <ul>
+          {logs.map((log, index) => (
+            <li
+              key={index}
+              className="my-2 flex justify-between items-center border-b border-gray-700 pb-2"
+            >
+              <span className="text-sm">
+                {log.src_ip} ➜ {log.dst_ip} ({log.protocol})
+              </span>
+              <button
+                className="ml-4 text-blue-500 underline hover:text-blue-300"
+                onClick={() => openModal(log)}
+              >
+                View Details
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
+
+      {/* Modal for full packet details */}
+      <Modal
+        isOpen={modalIsOpen}
+        onRequestClose={closeModal}
+        className="bg-gray-900 text-white p-6 rounded-md max-w-lg mx-auto mt-20"
+        overlayClassName="fixed inset-0 bg-black bg-opacity-75"
+      >
+        <h2 className="text-lg font-bold">Packet Details</h2>
+        {currentPacket && renderPacketInfo(currentPacket)}
+        <button
+          className="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+          onClick={closeModal}
+        >
+          Close
+        </button>
+      </Modal>
     </div>
   );
 };

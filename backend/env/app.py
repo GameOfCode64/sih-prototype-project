@@ -1,47 +1,48 @@
-from flask import Flask, render_template
+from flask import Flask, jsonify
 from flask_socketio import SocketIO, emit
-from scapy.all import sniff
-import os
-import logging
+from flask_cors import CORS
+from scapy.all import sniff, Packet
+import threading
 
-logging.basicConfig(filename='firewall_log.txt', level=logging.INFO)
-
-# Flask app setup
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*") 
+CORS(app, resources={r"/socket.io/*": {"origins": "*"}})
+socketio = SocketIO(app)
 
-BLOCKED_IPS = ['']
-
-
-def block_ip(ip):
-    command = f'netsh advfirewall firewall add rule name="Block {ip}" dir=in action=block remoteip={ip}'
-    os.system(command)
-    logging.info(f"Blocked IP: {ip}")
-    socketio.emit('log', {'message': f"Blocked IP: {ip}"})  
-
-
+# Function to handle packets
 def packet_handler(packet):
-    if packet.haslayer('IP'):
-        src_ip = packet['IP'].src
-        dst_ip = packet['IP'].dst
-        if src_ip in BLOCKED_IPS:
-            logging.info(f"Blocked packet from {src_ip} to {dst_ip}")
-            block_ip(src_ip)
-            return
-        logging.info(f"Allowed packet: {src_ip} -> {dst_ip}")
-        socketio.emit('log', {'message': f"Allowed packet: {src_ip} -> {dst_ip}"})  # Send to frontend
+    # Extract relevant packet information
+    packet_info = {
+        "version": packet.version if hasattr(packet, "version") else "N/A",
+        "ihl": packet.ihl if hasattr(packet, "ihl") else "N/A",
+        "tos": packet.tos if hasattr(packet, "tos") else "N/A",
+        "total_length": len(packet),
+        "identification": packet.id if hasattr(packet, "id") else "N/A",
+        "flags": packet.flags if hasattr(packet, "flags") else "N/A",
+        "ttl": packet.ttl if hasattr(packet, "ttl") else "N/A",
+        "protocol": packet.proto if hasattr(packet, "proto") else "N/A",
+        "header_checksum": packet.chksum if hasattr(packet, "chksum") else "N/A",
+        "src_ip": packet[1].src if packet.haslayer(1) else "N/A",
+        "dst_ip": packet[1].dst if packet.haslayer(1) else "N/A",
+        "options": packet.options if hasattr(packet, "options") else None,
+        "payload": str(packet.payload) if hasattr(packet, "payload") else "N/A"
+    }
+
+    # Emit the log to the frontend
+    socketio.emit("log", {"message": packet_info})
+
+# Function to start sniffing in a separate thread
+def start_sniffing():
+   sniff(iface='Wi-Fi', filter='ip', prn=packet_handler)
+ # Change 'Ethernet' to your network interface name
 
 @app.route('/')
 def index():
-    return "Packet Sniffer is Running!"
-def start_packet_sniffing():
-    interface_name = 'Wi-Fi' 
-    print(f"\nStarting packet capture on interface: {interface_name}")
-    sniff(iface=interface_name, filter='ip', prn=packet_handler)
-
+    return jsonify({"message": "Welcome to the Network Logger!"})
 
 if __name__ == "__main__":
-    from threading import Thread
-    sniff_thread = Thread(target=start_packet_sniffing)
-    sniff_thread.start()
-    socketio.run(app, host='0.0.0.0', port=5000)
+    # Start the packet sniffing in a separate thread
+    thread = threading.Thread(target=start_sniffing)
+    thread.start()
+    
+    # Run the Flask app with SocketIO
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
