@@ -3,7 +3,6 @@ import io, { Socket } from "socket.io-client";
 import { Rss } from "lucide-react";
 import Modal from "react-modal";
 
-// Establish socket connection (ensure it's initialized once)
 const socket: Socket = io("http://localhost:5000");
 
 const NetworkLogs = () => {
@@ -15,7 +14,7 @@ const NetworkLogs = () => {
 
   useEffect(() => {
     socket.on("log", (data) => {
-      const packetInfo = data.message; // Extract the packet info
+      const packetInfo = data.message;
       setLogs((prevLogs) => [...prevLogs, packetInfo]);
     });
 
@@ -34,9 +33,8 @@ const NetworkLogs = () => {
     setCurrentPacket(null);
   };
 
-  // Function to format payload data (if needed)
   const formatPayload = (payload: string) => {
-    return payload.replace(/\\x/g, " ").trim(); // Basic formatting to remove \x
+    return payload.replace(/\\x/g, " ").trim();
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
